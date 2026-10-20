@@ -56,6 +56,70 @@ paths:
           description: Unknown track ID
         "502":
           description: Audio source is unavailable
+  /music/search:
+    get:
+      operationId: searchMusic
+      tags: [music]
+      summary: Search Jamendo tracks allowed for download
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 120
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 10000
+            default: 0
+      responses:
+        "200":
+          description: Download-authorized tracks matching the search
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MusicSearchPayload"
+        "400":
+          description: Search query is too short or invalid
+        "503":
+          description: Music catalog API is not configured
+        "502":
+          description: Music catalog is unavailable
+  /music/tracks/{trackId}/download:
+    get:
+      operationId: downloadJamendoTrack
+      tags: [music]
+      summary: Download a Jamendo track when the artist allows it
+      parameters:
+        - name: trackId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: MP3 audio file
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid track ID
+        "403":
+          description: The artist does not allow downloads
+        "404":
+          description: Track not found
+        "503":
+          description: Music catalog API is not configured
+        "502":
+          description: Music catalog or audio source is unavailable
 components:
   schemas:
     HealthStatus:
@@ -65,4 +129,52 @@ components:
           type: string
       required:
         - status
+    MusicSearchPayload:
+      type: object
+      properties:
+        tracks:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchMusicTrack"
+        hasMore:
+          type: boolean
+        nextOffset:
+          type: integer
+      required: [tracks, hasMore, nextOffset]
+    SearchMusicTrack:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        artist:
+          type: string
+        album:
+          type: ["string", "null"]
+        coverUrl:
+          type: ["string", "null"]
+        audioUrl:
+          type: string
+        durationSeconds:
+          type: integer
+          minimum: 0
+        genre:
+          type: string
+        licenseUrl:
+          type: ["string", "null"]
+        downloadAllowed:
+          type: boolean
+          enum: [true]
+      required:
+        - id
+        - title
+        - artist
+        - album
+        - coverUrl
+        - audioUrl
+        - durationSeconds
+        - genre
+        - licenseUrl
+        - downloadAllowed
 

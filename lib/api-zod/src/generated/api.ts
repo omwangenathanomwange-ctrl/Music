@@ -27,3 +27,55 @@ export const DownloadTrackParams = zod.object({
 export const DownloadTrackResponse = zod.unknown()
 
 
+/**
+ * @summary Search Jamendo tracks allowed for download
+ */
+export const searchMusicQueryQMin = 2;
+export const searchMusicQueryQMax = 120;
+
+export const searchMusicQueryOffsetDefault = 0;
+export const searchMusicQueryOffsetMin = 0;
+export const searchMusicQueryOffsetMax = 10000;
+
+
+
+export const SearchMusicQueryParams = zod.object({
+  "q": zod.coerce.string().min(searchMusicQueryQMin).max(searchMusicQueryQMax),
+  "offset": zod.coerce.number().int().min(searchMusicQueryOffsetMin).max(searchMusicQueryOffsetMax).default(searchMusicQueryOffsetDefault)
+})
+
+export const searchMusicResponseTracksItemDurationSecondsMin = 0;
+
+
+
+export const SearchMusicResponse = zod.object({
+  "tracks": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "artist": zod.string(),
+  "album": zod.string().nullable(),
+  "coverUrl": zod.string().nullable(),
+  "audioUrl": zod.string(),
+  "durationSeconds": zod.number().int().min(searchMusicResponseTracksItemDurationSecondsMin),
+  "genre": zod.string(),
+  "licenseUrl": zod.string().nullable(),
+  "downloadAllowed": zod.literal(true)
+})),
+  "hasMore": zod.boolean(),
+  "nextOffset": zod.number().int()
+})
+
+
+/**
+ * @summary Download a Jamendo track when the artist allows it
+ */
+
+
+
+export const DownloadJamendoTrackParams = zod.object({
+  "trackId": zod.coerce.number().int().min(1)
+})
+
+export const DownloadJamendoTrackResponse = zod.unknown()
+
+

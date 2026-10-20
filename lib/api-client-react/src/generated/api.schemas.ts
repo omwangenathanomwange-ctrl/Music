@@ -9,3 +9,39 @@ export interface HealthStatus {
   status: string;
 }
 
+export interface SearchMusicTrack {
+  id: string;
+  title: string;
+  artist: string;
+  /** @nullable */
+  album: string | null;
+  /** @nullable */
+  coverUrl: string | null;
+  audioUrl: string;
+  /** @minimum 0 */
+  durationSeconds: number;
+  genre: string;
+  /** @nullable */
+  licenseUrl: string | null;
+  downloadAllowed: true;
+}
+
+export interface MusicSearchPayload {
+  tracks: SearchMusicTrack[];
+  hasMore: boolean;
+  nextOffset: number;
+}
+
+export type SearchMusicParams = {
+/**
+ * @minLength 2
+ * @maxLength 120
+ */
+q: string;
+/**
+ * @minimum 0
+ * @maximum 10000
+ */
+offset?: number;
+};
+

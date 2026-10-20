@@ -7,3 +7,6 @@
  */
 
 export * from './healthStatus';
+export * from './musicSearchPayload';
+export * from './searchMusicParams';
+export * from './searchMusicTrack';

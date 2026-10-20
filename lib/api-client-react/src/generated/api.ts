@@ -16,7 +16,9 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
-  HealthStatus
+  HealthStatus,
+  MusicSearchPayload,
+  SearchMusicParams
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -189,6 +191,167 @@ export function useDownloadTrack<TData = Awaited<ReturnType<typeof downloadTrack
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getDownloadTrackQueryOptions(trackId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSearchMusicUrl = (params: SearchMusicParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/music/search?${stringifiedParams}` : `/api/music/search`
+}
+
+/**
+ * @summary Search Jamendo tracks allowed for download
+ */
+export const searchMusic = async (params: SearchMusicParams, options?: Parameters<typeof customFetch>[1]): Promise<MusicSearchPayload> => {
+
+  return customFetch<MusicSearchPayload>(getSearchMusicUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getSearchMusicQueryKey = (params?: SearchMusicParams,) => {
+    return [
+    `/api/music/search`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getSearchMusicQueryOptions = <TData = Awaited<ReturnType<typeof searchMusic>>, TError = ErrorType<void>>(params: SearchMusicParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof searchMusic>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSearchMusicQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof searchMusic>>> = ({ signal }) => searchMusic(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof searchMusic>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type SearchMusicQueryResult = NonNullable<Awaited<ReturnType<typeof searchMusic>>>
+export type SearchMusicQueryError = ErrorType<void>
+
+
+/**
+ * @summary Search Jamendo tracks allowed for download
+ */
+
+export function useSearchMusic<TData = Awaited<ReturnType<typeof searchMusic>>, TError = ErrorType<void>>(
+ params: SearchMusicParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof searchMusic>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getSearchMusicQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getDownloadJamendoTrackUrl = (trackId: number,) => {
+
+
+
+
+  return `/api/music/tracks/${trackId}/download`
+}
+
+/**
+ * @summary Download a Jamendo track when the artist allows it
+ */
+export const downloadJamendoTrack = async (trackId: number, options?: Parameters<typeof customFetch>[1]): Promise<Blob> => {
+
+  return customFetch<Blob>(getDownloadJamendoTrackUrl(trackId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getDownloadJamendoTrackQueryKey = (trackId: number,) => {
+    return [
+    `/api/music/tracks/${trackId}/download`
+    ] as const;
+    }
+
+
+export const getDownloadJamendoTrackQueryOptions = <TData = Awaited<ReturnType<typeof downloadJamendoTrack>>, TError = ErrorType<void>>(trackId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadJamendoTrack>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDownloadJamendoTrackQueryKey(trackId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadJamendoTrack>>> = ({ signal }) => downloadJamendoTrack(trackId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: trackId !== null && trackId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof downloadJamendoTrack>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type DownloadJamendoTrackQueryResult = NonNullable<Awaited<ReturnType<typeof downloadJamendoTrack>>>
+export type DownloadJamendoTrackQueryError = ErrorType<void>
+
+
+/**
+ * @summary Download a Jamendo track when the artist allows it
+ */
+
+export function useDownloadJamendoTrack<TData = Awaited<ReturnType<typeof downloadJamendoTrack>>, TError = ErrorType<void>>(
+ trackId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof downloadJamendoTrack>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getDownloadJamendoTrackQueryOptions(trackId,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
