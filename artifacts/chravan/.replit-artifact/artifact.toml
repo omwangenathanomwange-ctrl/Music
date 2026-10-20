@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "CHRAVAN"
+description = "A futuristic music library for discovering, playing, favoriting, organizing, and downloading music, created by ALVAN CHRAVAN."
+version = "1.0.0"
+id = "artifacts/chravan"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20936
+
+[services.development]
+run = "pnpm --filter @workspace/chravan run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/chravan", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/chravan/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20936"
+BASE_PATH = "/"

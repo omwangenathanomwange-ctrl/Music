@@ -24,6 +24,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /downloads/{trackId}:
+    get:
+      operationId: downloadTrack
+      tags: [music]
+      summary: Download a public demo audio track
+      parameters:
+        - name: trackId
+          in: path
+          required: true
+          schema:
+            type: string
+            enum:
+              - soundhelix-1
+              - soundhelix-2
+              - soundhelix-3
+              - soundhelix-4
+              - soundhelix-5
+              - soundhelix-6
+              - soundhelix-7
+              - soundhelix-8
+      responses:
+        "200":
+          description: MP3 audio file
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Unknown track ID
+        "502":
+          description: Audio source is unavailable
 components:
   schemas:
     HealthStatus:
