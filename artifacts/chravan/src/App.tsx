@@ -31,6 +31,31 @@ const initialTracks: Track[] = Array.from({ length: 8 }, (_, i) => ({
   artwork: i,
 }));
 
+type ItunesSong = {
+  trackId: number;
+  trackName: string;
+  artistName: string;
+  collectionName?: string;
+  primaryGenreName?: string;
+  previewUrl?: string;
+  trackTimeMillis?: number;
+};
+
+function fromItunes(song: ItunesSong): Track {
+  const seconds = Math.round((song.trackTimeMillis ?? 0) / 1000);
+  return {
+    id: `itunes-${song.trackId}`,
+    title: song.trackName,
+    artist: song.artistName,
+    genre: song.primaryGenreName || 'Music',
+    mood: song.collectionName || 'Search result',
+    duration: seconds ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : '--:--',
+    src: song.previewUrl ?? '',
+    artwork: song.trackId % 8,
+    custom: true,
+  };
+}
+
 const palettes = [
   ['#092b36', '#18c8af', '#a5ffee'], ['#201337', '#9c54db', '#e7b4ff'],
   ['#362116', '#d47645', '#ffcb8a'], ['#10283e', '#368ed1', '#a8dbff'],
@@ -81,13 +106,34 @@ function App() {
   const [playlistName, setPlaylistName] = useState('');
   const [playlistTrackId, setPlaylistTrackId] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
+  const [results, setResults] = useState<Track[]>([]);
   const audioRef = useRef<HTMLAudioElement>(null);
   const noticeTimer = useRef<number | undefined>(undefined);
-  const currentTrack = tracks.find((track) => track.id === currentId) ?? null;
+  const currentTrack = tracks.find((track) => track.id === currentId) ?? results.find((track) => track.id === currentId) ?? null;
 
   useEffect(() => { localStorage.setItem('chravan.catalog', JSON.stringify(tracks)); }, [tracks]);
   useEffect(() => { localStorage.setItem('chravan.favorites', JSON.stringify(favorites)); }, [favorites]);
   useEffect(() => { localStorage.setItem('chravan.playlists', JSON.stringify(playlists)); }, [playlists]);
+  useEffect(() => {
+    const term = query.trim();
+    if (view !== 'browse' || term.length < 2) { setResults([]); return; }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&limit=25`;
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = (await response.json()) as { results: ItunesSong[] };
+        setResults(data.results.filter((song) => song.previewUrl).map(fromItunes));
+      } catch {
+        if (!controller.signal.aborted) {
+          setResults([]);
+          showNotice('Music search is unavailable right now. Check your connection and try again.');
+        }
+      }
+    }, 400);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [query, view]);
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -216,6 +262,7 @@ function App() {
     const playlistMatch = view !== 'playlists' || !activePlaylist || playlists.find((item) => item.id === activePlaylist)?.trackIds.includes(track.id);
     return searchMatch && genreMatch && favoriteMatch && playlistMatch;
   }), [tracks, query, genre, view, favorites, playlists, activePlaylist]);
+  const shownTracks = view === 'browse' && query.trim().length >= 2 ? [...visibleTracks, ...results] : visibleTracks;
 
   const viewTitle = view === 'favorites' ? 'Your favorites' : view === 'manage' ? 'Catalog studio' : view === 'playlists' ? 'Your playlists' : 'The sound library';
   function chooseView(next: View) {
@@ -252,7 +299,7 @@ function App() {
         <main>
           <div className="section-heading">
             <div><div className="eyebrow">YOUR FREQUENCY / 0{tracks.length}</div><h2>{viewTitle}</h2><p>{view === 'manage' ? 'Shape the music in your world.' : view === 'favorites' ? 'All the sounds you kept close.' : view === 'playlists' ? 'A place for every kind of night.' : 'Eight public demo tracks. Find something that stays.'}</p></div>
-            <span className="count-label">{visibleTracks.length} {visibleTracks.length === 1 ? 'TRACK' : 'TRACKS'}</span>
+            <span className="count-label">{shownTracks.length} {shownTracks.length === 1 ? 'TRACK' : 'TRACKS'}</span>
           </div>
 
           {view !== 'manage' && <div className="toolbar">
@@ -276,8 +323,8 @@ function App() {
             <div className="management-toolbar"><div className="inline-note"><Disc3 size={15} /> Add your own audio by URL, or edit the local catalog. Starter tracks are public SoundHelix demo audio.</div><button className="button" onClick={() => openTrackEditor()} data-testid="button-add-track"><Plus size={14} /> Add track</button></div>
             <div className="management-list">{visibleTracks.map((track) => <div className="management-row" key={track.id} data-testid={`row-track-${track.id}`}><Artwork track={track} /><div className="track-info"><div className="track-title">{track.title}</div><div className="track-artist">{track.artist}</div></div><div className="track-tags"><span className="track-tag">{track.genre}</span></div><span className="track-duration">{track.custom ? 'LOCAL' : 'DEMO'}</span><div className="row-actions"><button aria-label={`Edit ${track.title}`} onClick={() => openTrackEditor(track)} data-testid={`button-edit-${track.id}`}><Pencil size={14} /></button><button aria-label={`Remove ${track.title}`} onClick={() => removeTrack(track)} data-testid={`button-remove-${track.id}`}><Trash2 size={14} /></button></div></div>)}</div>
             {tracks.length === 0 && <div className="empty-state"><Library size={25} /><h3>Your catalog is clear</h3><p>Add an audio URL to bring a track into your library.</p><button className="button" onClick={() => openTrackEditor()}><Plus size={14} /> Add a track</button></div>}
-          </div> : visibleTracks.length ? <div className="track-grid">
-            {visibleTracks.map((track) => <article className="track-card" key={track.id} data-testid={`card-track-${track.id}`}>
+          </div> : shownTracks.length ? <div className="track-grid">
+            {shownTracks.map((track) => <article className="track-card" key={track.id} data-testid={`card-track-${track.id}`}>
               <Artwork track={track} />
               <div className="card-hover-actions">
                 <button className={`cover-action ${favorites.includes(track.id) ? 'liked' : ''}`} aria-label={`${favorites.includes(track.id) ? 'Remove from' : 'Add to'} favorites: ${track.title}`} onClick={() => toggleFavorite(track.id)} data-testid={`button-favorite-${track.id}`}><Heart size={14} fill={favorites.includes(track.id) ? 'currentColor' : 'none'} /></button>
