@@ -1,0 +1,58 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # The Vite config throws if these are missing
+      PORT: "3000"
+      BASE_PATH: "/"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web app
+        run: pnpm --filter @workspace/chravan run build
+
+      - name: Add Android platform (first run only)
+        working-directory: artifacts/chravan
+        run: |
+          if [ ! -d android ]; then
+            pnpm exec cap add android
+          fi
+
+      - name: Sync web build into Android project
+        working-directory: artifacts/chravan
+        run: pnpm exec cap sync android
+
+      - name: Build debug APK
+        working-directory: artifacts/chravan/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chravan-debug-apk
+          path: artifacts/chravan/android/app/build/outputs/apk/debug/app-debug.apk
