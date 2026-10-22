@@ -16,6 +16,7 @@ type Track = {
   src: string;
   artwork: number;
   custom?: boolean;
+  downloadSrc?: string;
 };
 type Playlist = { id: string; name: string; trackIds: string[] };
 type View = 'browse' | 'favorites' | 'playlists' | 'manage';
@@ -54,6 +55,43 @@ function fromItunes(song: ItunesSong): Track {
     artwork: song.trackId % 8,
     custom: true,
   };
+}
+
+const JAMENDO_CLIENT_ID = '86463330';
+
+type JamendoSong = {
+  id: string;
+  name: string;
+  artist_name: string;
+  album_name?: string;
+  audio?: string;
+  audiodownload?: string;
+  audiodownload_allowed?: boolean;
+  duration?: number | string;
+  musicinfo?: { tags?: { genres?: string[] } };
+};
+
+function fromJamendo(song: JamendoSong): Track | null {
+  if (!song.audio) return null;
+  const seconds = Math.round(Number(song.duration) || 0);
+  return {
+    id: `jamendo-${song.id}`,
+    title: song.name,
+    artist: song.artist_name,
+    genre: song.musicinfo?.tags?.genres?.[0] || 'Independent',
+    mood: song.album_name || 'Creative Commons',
+    duration: seconds ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : '--:--',
+    src: song.audio.replace(/^http:/, 'https:'),
+    downloadSrc: song.audiodownload_allowed && song.audiodownload ? song.audiodownload.replace(/^http:/, 'https:') : undefined,
+    artwork: Number(song.id) % 8,
+    custom: true,
+  };
+}
+
+async function fetchJson<T>(url: string, signal: AbortSignal): Promise<T> {
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return (await response.json()) as T;
 }
 
 const palettes = [
@@ -177,17 +215,26 @@ function App() {
     if (view !== 'browse' || term.length < 2) { setResults([]); return; }
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
-      try {
-        const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&limit=25`;
-        const response = await fetch(url, { signal: controller.signal });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = (await response.json()) as { results: ItunesSong[] };
-        setResults(data.results.filter((song) => song.previewUrl).map(fromItunes));
-      } catch {
-        if (!controller.signal.aborted) {
-          setResults([]);
-          showNotice('Music search is unavailable right now. Check your connection and try again.');
+      const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&limit=20`;
+      const jamendoUrl = `https://api.jamendo.com/v3.0/tracks/?client_id=${JAMENDO_CLIENT_ID}&format=json&limit=20&namesearch=${encodeURIComponent(term)}&audioformat=mp32&audiodlformat=mp32&include=musicinfo`;
+      const [itunes, jamendo] = await Promise.allSettled([
+        fetchJson<{ results: ItunesSong[] }>(itunesUrl, controller.signal),
+        fetchJson<{ results: JamendoSong[] }>(jamendoUrl, controller.signal),
+      ]);
+      if (controller.signal.aborted) return;
+      const found: Track[] = [];
+      if (jamendo.status === 'fulfilled') {
+        for (const song of jamendo.value.results ?? []) {
+          const track = fromJamendo(song);
+          if (track) found.push(track);
         }
+      }
+      if (itunes.status === 'fulfilled') {
+        found.push(...(itunes.value.results ?? []).filter((song) => song.previewUrl).map(fromItunes));
+      }
+      setResults(found);
+      if (itunes.status === 'rejected' && jamendo.status === 'rejected') {
+        showNotice('Music search is unavailable right now. Check your connection and try again.');
       }
     }, 400);
     return () => { window.clearTimeout(timer); controller.abort(); };
@@ -328,7 +375,7 @@ function App() {
       return;
     }
     try {
-      const response = await fetch(track.src);
+      const response = await fetch(track.downloadSrc ?? track.src);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const blob = await response.blob();
       await putAudio(track.id, blob);
