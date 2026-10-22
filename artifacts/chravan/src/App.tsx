@@ -87,6 +87,54 @@ function readStorage<T>(key: string, fallback: T): T {
   } catch { return fallback; }
 }
 
+const DB_NAME = 'chravan-offline';
+const STORE = 'audio';
+let dbPromise: Promise<IDBDatabase> | null = null;
+
+function openDb(): Promise<IDBDatabase> {
+  dbPromise ??= new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(STORE);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  return dbPromise;
+}
+
+async function loadAllAudio(): Promise<Map<string, Blob>> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const found = new Map<string, Blob>();
+    const request = db.transaction(STORE, 'readonly').objectStore(STORE).openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (cursor) { found.set(String(cursor.key), cursor.value as Blob); cursor.continue(); }
+      else resolve(found);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function putAudio(id: string, blob: Blob): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(blob, id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function deleteAudio(id: string): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 function App() {
   const [tracks, setTracks] = useState<Track[]>(() => readStorage('chravan.catalog', initialTracks));
   const [favorites, setFavorites] = useState<string[]>(() => readStorage('chravan.favorites', []));
@@ -107,6 +155,8 @@ function App() {
   const [playlistTrackId, setPlaylistTrackId] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [results, setResults] = useState<Track[]>([]);
+  const [offlineIds, setOfflineIds] = useState<string[]>([]);
+  const offlineUrls = useRef(new Map<string, string>());
   const audioRef = useRef<HTMLAudioElement>(null);
   const noticeTimer = useRef<number | undefined>(undefined);
   const currentTrack = tracks.find((track) => track.id === currentId) ?? results.find((track) => track.id === currentId) ?? null;
@@ -114,6 +164,14 @@ function App() {
   useEffect(() => { localStorage.setItem('chravan.catalog', JSON.stringify(tracks)); }, [tracks]);
   useEffect(() => { localStorage.setItem('chravan.favorites', JSON.stringify(favorites)); }, [favorites]);
   useEffect(() => { localStorage.setItem('chravan.playlists', JSON.stringify(playlists)); }, [playlists]);
+  useEffect(() => {
+    loadAllAudio()
+      .then((blobs) => {
+        blobs.forEach((blob, id) => offlineUrls.current.set(id, URL.createObjectURL(blob)));
+        setOfflineIds(Array.from(blobs.keys()));
+      })
+      .catch(() => { /* offline storage unavailable; streaming still works */ });
+  }, []);
   useEffect(() => {
     const term = query.trim();
     if (view !== 'browse' || term.length < 2) { setResults([]); return; }
@@ -170,7 +228,7 @@ function App() {
       setCurrentId(track.id);
       setPosition(0);
       setDuration(0);
-      audio.src = track.src;
+      audio.src = offlineUrls.current.get(track.id) ?? track.src;
       audio.load();
     }
     void audio.play().then(() => setPlaying(true)).catch(() => {
@@ -228,6 +286,11 @@ function App() {
   }
   function removeTrack(track: Track) {
     if (!window.confirm(`Remove “${track.title}” from your local catalog?`)) return;
+    const url = offlineUrls.current.get(track.id);
+    if (url) URL.revokeObjectURL(url);
+    offlineUrls.current.delete(track.id);
+    setOfflineIds((old) => old.filter((id) => id !== track.id));
+    void deleteAudio(track.id).catch(() => {});
     setTracks((old) => old.filter((item) => item.id !== track.id));
     setFavorites((old) => old.filter((id) => id !== track.id));
     setPlaylists((old) => old.map((playlist) => ({ ...playlist, trackIds: playlist.trackIds.filter((id) => id !== track.id) })));
@@ -254,6 +317,30 @@ function App() {
     setModal(null);
   }
 
+  async function toggleOffline(track: Track) {
+    if (offlineIds.includes(track.id)) {
+      const url = offlineUrls.current.get(track.id);
+      if (url) URL.revokeObjectURL(url);
+      offlineUrls.current.delete(track.id);
+      setOfflineIds((old) => old.filter((id) => id !== track.id));
+      try { await deleteAudio(track.id); } catch { /* already gone */ }
+      showNotice(`Removed “${track.title}” from offline songs.`);
+      return;
+    }
+    try {
+      const response = await fetch(track.src);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      await putAudio(track.id, blob);
+      offlineUrls.current.set(track.id, URL.createObjectURL(blob));
+      setOfflineIds((old) => [...old, track.id]);
+      setTracks((old) => old.some((item) => item.id === track.id) ? old : [...old, track]);
+      showNotice(`“${track.title}” is saved for offline listening.`);
+    } catch {
+      showNotice('Could not save this song. Check your connection and try again.');
+    }
+  }
+
   const genres = useMemo(() => ['All sounds', ...Array.from(new Set(tracks.map((track) => track.genre)))], [tracks]);
   const visibleTracks = useMemo(() => tracks.filter((track) => {
     const searchMatch = `${track.title} ${track.artist} ${track.genre} ${track.mood}`.toLowerCase().includes(query.toLowerCase());
@@ -262,7 +349,9 @@ function App() {
     const playlistMatch = view !== 'playlists' || !activePlaylist || playlists.find((item) => item.id === activePlaylist)?.trackIds.includes(track.id);
     return searchMatch && genreMatch && favoriteMatch && playlistMatch;
   }), [tracks, query, genre, view, favorites, playlists, activePlaylist]);
-  const shownTracks = view === 'browse' && query.trim().length >= 2 ? [...visibleTracks, ...results] : visibleTracks;
+  const shownTracks = view === 'browse' && query.trim().length >= 2
+    ? [...visibleTracks, ...results.filter((result) => !tracks.some((track) => track.id === result.id))]
+    : visibleTracks;
 
   const viewTitle = view === 'favorites' ? 'Your favorites' : view === 'manage' ? 'Catalog studio' : view === 'playlists' ? 'Your playlists' : 'The sound library';
   function chooseView(next: View) {
@@ -328,12 +417,12 @@ function App() {
               <Artwork track={track} />
               <div className="card-hover-actions">
                 <button className={`cover-action ${favorites.includes(track.id) ? 'liked' : ''}`} aria-label={`${favorites.includes(track.id) ? 'Remove from' : 'Add to'} favorites: ${track.title}`} onClick={() => toggleFavorite(track.id)} data-testid={`button-favorite-${track.id}`}><Heart size={14} fill={favorites.includes(track.id) ? 'currentColor' : 'none'} /></button>
-                <a className="cover-action" aria-label={`Download ${track.title}`} title="Download demo audio" href={track.custom ? track.src : `/api/downloads/${track.id}`} download data-testid={`download-${track.id}`}><Download size={14} /></a>
+                <button className={`cover-action ${offlineIds.includes(track.id) ? 'liked' : ''}`} aria-label={`${offlineIds.includes(track.id) ? 'Remove offline copy of' : 'Save for offline'}: ${track.title}`} title={offlineIds.includes(track.id) ? 'Remove offline copy' : 'Save for offline listening'} onClick={() => void toggleOffline(track)} data-testid={`button-offline-${track.id}`}><Download size={14} /></button>
                 <button className="cover-action" aria-label={`Add ${track.title} to playlist`} title="Add to playlist" onClick={() => { setPlaylistTrackId(track.id); setModal('add-to-playlist'); }} data-testid={`button-add-playlist-${track.id}`}><Plus size={14} /></button>
               </div>
               <button className="cover-play" aria-label={`Play ${track.title}`} onClick={() => playTrack(track)} data-testid={`button-play-${track.id}`}>{currentId === track.id && playing ? <Pause size={18} /> : <Play size={17} fill="currentColor" />}</button>
               <div className="track-info"><div><div className="track-title">{track.title}</div><div className="track-artist">{track.artist}</div></div><span className="track-duration">{track.duration}</span></div>
-              <div className="track-tags"><span className="track-tag">{track.genre}</span><span className="track-tag">{track.mood}</span>{!track.custom && <span className="track-tag">Demo audio</span>}</div>
+              <div className="track-tags"><span className="track-tag">{track.genre}</span><span className="track-tag">{track.mood}</span>{!track.custom && <span className="track-tag">Demo audio</span>}{offlineIds.includes(track.id) && <span className="track-tag">Offline</span>}</div>
             </article>)}
           </div> : <div className="empty-state"><Headphones size={26} /><h3>{view === 'favorites' ? 'Nothing saved yet' : view === 'playlists' && activePlaylist ? 'This mix is waiting for a first track' : 'No tracks found'}</h3><p>{view === 'favorites' ? 'Tap the heart on a track to keep it here.' : 'Try a different search or filter to tune back in.'}</p>{(query || genre !== 'All sounds') && <button className="button secondary" onClick={() => { setQuery(''); setGenre('All sounds'); }}>Clear filters</button>}</div>}
 
